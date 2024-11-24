@@ -1,10 +1,15 @@
 import os
 import pandas as pd
 import logging
+import datetime
+
+# Get timestamp
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Define the base directory and log file path
-base_dir = r'H:\CCSI\PlanningModule\Brachy Projects\1. CIHR MDBC Collaboration\Prostate Patients\Prostate Patients (Dakota 2022-2020)'  # Set your base directory path here
-log_filename = os.path.join(base_dir, 'redcap_processing.log')
+base_dir = r'/home/mjm/Documents/UBC/Research/nextgenbrachy/patient data/Prostate Patients (Matt 2022-2020)'  # Set your base directory path here
+log_filename = os.path.join(base_dir, f'redcap_processing_{timestamp}.log')
+
 
 # Set up logging to print to console and save to the log file in base_dir
 logging.basicConfig(
@@ -102,19 +107,51 @@ def read_metrics_file(file_path, metrics_mapping):
             metrics_dict[redcap_field] = value
     return metrics_dict
 
-# Function to process each directory and collect data
-def process_directory(base_dir, min_id=None, max_id=None):
+
+
+
+# Function to check completeness based on the selected option
+def check_completeness(patient_data, mappings, completion_option):
+    if completion_option == 1:
+        # Option 1: Mark everything as complete
+        return "2"
+    elif completion_option == 2:
+        # Option 2: Mark as incomplete if any required field is missing
+        for mapping_dict in mappings.values():  # Iterate over structure mappings
+            for field in mapping_dict.values():
+                if field not in patient_data or pd.isna(patient_data[field]) or patient_data[field] == "":
+                    return "1"  # Incomplete if any field is missing
+        return "2"  # Complete if all fields are present
+    elif completion_option == 3:
+        # Option 3: Mark as incomplete only if no fields are complete
+        structures_present = any(
+            any(patient_data.get(field, "") not in [None, "", "0"]  # Check if any field has a valid value
+                for field in mapping_dict.values())
+            for mapping_dict in mappings.values()
+        )
+        return "2" if structures_present else "1"  # Complete if any field is valid
+    else:
+        raise ValueError("Invalid completion option selected.")
+
+# Modify the `process_directory` function to use the new completeness logic
+def process_directory(base_dir, min_id=None, max_id=None, ids_to_skip = [],completion_option = 1):
     for patient_folder in os.listdir(base_dir):
-        if patient_folder.startswith("PT") and patient_folder[2:6].isdigit():
+        patient_path = os.path.join(base_dir, patient_folder)
+
+        if os.path.isdir(patient_path) and patient_folder.startswith("PT") and patient_folder[2:6].isdigit():
             record_id = int(patient_folder[2:6])
+            if record_id in ids_to_skip:
+                logging.info(f"Skipping {patient_folder} (record_id {record_id}): set to skip.")
+                continue
+
             if (min_id is not None and record_id < min_id) or (max_id is not None and record_id > max_id):
                 logging.info(f"Skipping {patient_folder} (record_id {record_id}): out of range ({min_id}-{max_id}).")
                 continue
 
             logging.info(f"Processing {patient_folder} with record_id {record_id}.")
-            # Initialize patient data with prefixed record_id, event name, and blank repeat fields
+            # Initialize patient data
             patient_data = {
-                'record_id': f"{record_id_prefix}{record_id}", 
+                'record_id': f"{record_id_prefix}{record_id}",
                 'redcap_event_name': event_name,
                 'redcap_repeat_instrument': '',  # Leave blank if not using repeating instruments
                 'redcap_repeat_instance': ''     # Leave blank if not using repeating instances
@@ -122,21 +159,13 @@ def process_directory(base_dir, min_id=None, max_id=None):
 
             tg43_path = os.path.join(base_dir, patient_folder, 'TG43')
             tg186_path = os.path.join(base_dir, patient_folder, 'TG186')
-            
-            tg43_exists = os.path.exists(tg43_path)
-            tg186_exists = os.path.exists(tg186_path)
-            
-            if not tg43_exists and not tg186_exists:
-                logging.warning(f"Skipping {patient_folder}: both TG43 and TG186 folders are missing.")
-                continue
-            
+
             for path, mappings, complete_field in [
                 (tg43_path, tg43_mappings, 'dose_parameters_tg43_complete'),
                 (tg186_path, tg186_mappings, 'dose_parameters_mc_complete')
             ]:
-                if os.path.exists(path):
+                if os.path.exists(path) and os.listdir(path):  # Check if folder exists and is not empty
                     logging.info(f"Processing folder: {path}")
-                    
                     for file_name in os.listdir(path):
                         if file_name.endswith("_metrics.csv"):
                             structure = None
@@ -148,45 +177,52 @@ def process_directory(base_dir, min_id=None, max_id=None):
                                 structure = 'prostate'
                             elif "urethra" in file_name.lower():
                                 structure = 'urethra'
-                            
+
                             if structure:
                                 file_path = os.path.join(path, file_name)
                                 logging.info(f"Processing file: {file_path} for structure: {structure}")
                                 metrics_dict = read_metrics_file(file_path, mappings[structure])
                                 patient_data.update(metrics_dict)
-                    
-                    # Check completeness: mark as complete only if every required field has a non-NaN value
-                    complete = True
-                    for mapping_dict in mappings.values():  # Iterate over each structure's mapping dictionary
-                        for field in mapping_dict.values():  # Iterate over each field in the mapping dictionary
-                            if field not in patient_data or pd.isna(patient_data[field]):
-                                complete = False
-                                break
-                    
-                    # Set the completion field based on the completeness check
-                    patient_data[complete_field] = "2" if complete else "1"
-                    logging.info(f"{complete_field} set to {'2' if complete else '1'} for {patient_folder}.")
+
+                    # Check completeness based on the selected option
+                    patient_data[complete_field] = check_completeness(patient_data, mappings, completion_option)
+                    logging.info(f"{complete_field} set to {patient_data[complete_field]} for {patient_folder}.")
+                else:
+                    logging.warning(f"Skipping {path}: folder is missing or empty.")
             
             data.loc[len(data)] = patient_data
 
+
+# Define the completion option
+# 1: Mark everything as complete
+# 2: Mark as incomplete if any required field is missing
+# 3: Mark as incomplete only if no fields are complete for the TG folder
+completion_option = 3  # Change this to 1, 2, or 3 based on desired behavior
+
+
 # Execute the directory processing
-min_id, max_id = 1, 93
+min_id, max_id = 94, 153
 record_id_prefix = ""
 event_name = 'baseline_arm_1'  # Replace this with the correct event name for your project
 
-process_directory(base_dir, min_id=min_id, max_id=max_id)
+# Identify patient folders to skip
+ids_to_skip = []
 
-# Set all completion fields to "2" directly, without performing a completeness check
-set_all_fields_to_complete = True
-if set_all_fields_to_complete == True:
-    data['dose_parameters_tg43_complete'] = "2"
-    data['dose_parameters_mc_complete'] = "2"
+process_directory(base_dir, min_id=min_id, max_id=max_id, ids_to_skip = ids_to_skip, completion_option = completion_option)
+
 
 # Replace NaN with blank in the DataFrame before saving to CSV
 data.fillna('', inplace=True)
 
+# Sort the DataFrame by 'record_id' (assuming 'record_id' can be sorted as an integer)
+data['record_id'] = pd.to_numeric(data['record_id'], errors='coerce')  # Ensure numeric sorting
+data.sort_values(by='record_id', inplace=True)
+
 # Save to CSV in the same directory as the patient folders
-file_name = 'redcap_data_upload_dakota_1-93.csv'
+
+
+file_name = f'redcap_data_upload_Matthew_{min_id}-{max_id}_SK-{ids_to_skip}- {timestamp} - complete opt_{completion_option}.csv'
+
 filepath = os.path.join(base_dir, file_name)
 data.to_csv(filepath, index=False)
 logging.info(f"CSV file saved to {filepath}")
