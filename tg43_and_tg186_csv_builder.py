@@ -95,8 +95,22 @@ tg186_mappings = {
 data = pd.DataFrame(columns=headers)
 
 # Function to read metrics from a CSV file based on the structure type
-def read_metrics_file(file_path, metrics_mapping):
-    metrics_data = pd.read_csv(file_path, skiprows=2, header=None, usecols=[0, 1])
+def read_metrics_file(file_path, metrics_mapping, nan_handling):
+    metrics_data = pd.read_csv(
+    file_path,
+    skiprows=2,
+    header=None,
+    usecols=[0, 1],
+    na_values=['n/a'],  # Specify 'n/a' as a missing value
+    keep_default_na=True  # Keep default missing value detection (e.g., empty strings, NaN)
+    )
+
+    # Replace NaN values specifically created from 'n/a' with 0
+    if nan_handling == 1:
+        metrics_data.fillna(0, inplace=True)
+    elif nan_handling == 2:
+        pass
+
     metrics_dict = {}
     
     # Iterate over rows to find values that map to REDCap fields
@@ -105,6 +119,7 @@ def read_metrics_file(file_path, metrics_mapping):
         if metric_name in metrics_mapping:
             redcap_field = metrics_mapping[metric_name]
             metrics_dict[redcap_field] = value
+
     return metrics_dict
 
 
@@ -134,7 +149,7 @@ def check_completeness(patient_data, mappings, completion_option):
         raise ValueError("Invalid completion option selected.")
 
 # Modify the `process_directory` function to use the new completeness logic
-def process_directory(base_dir, min_id=None, max_id=None, ids_to_skip = [],completion_option = 1):
+def process_directory(base_dir, min_id=None, max_id=None, ids_to_skip = [],completion_option = 1, nan_handling = 1):
     for patient_folder in os.listdir(base_dir):
         patient_path = os.path.join(base_dir, patient_folder)
 
@@ -181,7 +196,7 @@ def process_directory(base_dir, min_id=None, max_id=None, ids_to_skip = [],compl
                             if structure:
                                 file_path = os.path.join(path, file_name)
                                 logging.info(f"Processing file: {file_path} for structure: {structure}")
-                                metrics_dict = read_metrics_file(file_path, mappings[structure])
+                                metrics_dict = read_metrics_file(file_path, mappings[structure], nan_handling)
                                 patient_data.update(metrics_dict)
 
                     # Check completeness based on the selected option
@@ -192,8 +207,14 @@ def process_directory(base_dir, min_id=None, max_id=None, ids_to_skip = [],compl
             
             data.loc[len(data)] = patient_data
 
+# Define how to handle n/a values in _metrics.csv from egs_brachy
+# Default is 1!
+# 1: set n/a to 0 (this is actually appropriate because n/a in egs_brachy output for a particular metric I think actually means 0)
+# 2: set n/a to nan
+nan_handling = 1
 
 # Define the completion option
+# Default is 1!
 # 1: Mark everything as complete
 # 2: Mark as incomplete if any required field is missing
 # 3: Mark as incomplete only if no fields are complete for the TG folder
