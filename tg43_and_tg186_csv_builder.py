@@ -7,7 +7,9 @@ import datetime
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Define the base directory and log file path
-base_dir = r'/home/mjm/Documents/UBC/Research/nextgenbrachy/patient data/Prostate Patients (Matt 2022-2020)'  # Set your base directory path here
+#base_dir = r'/home/mjm/Documents/UBC/Research/nextgenbrachy/patient data/Prostate Patients (Matt 2022-2020)'  # Set your base directory path here
+base_dir = r'/home/mjm/Documents/UBC/Research/nextgenbrachy/patient data/Prostate Patients (Dakota 2022-2020)'  # Set your base directory path here
+
 log_filename = os.path.join(base_dir, f'redcap_processing_{timestamp}.log')
 
 
@@ -59,7 +61,9 @@ metrics_to_redcap_tg43_rectum = {
 }
 
 metrics_to_redcap_tg43_urethra = {
-    'D0.1 (cc) / Gy': 'uret_d01cc'
+    'D0.1 (cc) / Gy': 'uret_d01cc',
+    'D1 (cc) / Gy': 'uret_d1cc', 
+    'D5 (cc) / Gy': 'uret_d5cc'
 }
 
 metrics_to_redcap_tg43_bladder = {
@@ -222,12 +226,13 @@ completion_option = 3  # Change this to 1, 2, or 3 based on desired behavior
 
 
 # Execute the directory processing
-min_id, max_id = 94, 153
+min_id, max_id = 1, 93
 record_id_prefix = ""
 event_name = 'baseline_arm_1'  # Replace this with the correct event name for your project
 
 # Identify patient folders to skip
-ids_to_skip = []
+#ids_to_skip = [158] # 2022-2020 (Matt) cohort
+ids_to_skip = [30,53,64,87,88] # 2022-2020 (Dakota) cohort
 
 process_directory(base_dir, min_id=min_id, max_id=max_id, ids_to_skip = ids_to_skip, completion_option = completion_option)
 
